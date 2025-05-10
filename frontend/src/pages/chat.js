@@ -387,11 +387,7 @@ const ReferenceItem = ({ reference, index, userID }) => {
     </p>
   )}
 
-  {reference.similarity_score !== undefined && (
-    <p style={{ margin: '0.25rem 0', fontSize: '0.9rem', color: '#333' }}>
-      Raw Score: {reference.similarity_score.toFixed(7)}
-    </p>
-  )}
+  
         </div>
 
         <div className="reference-status-container">

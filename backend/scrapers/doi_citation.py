@@ -1,26 +1,45 @@
 import json
 import requests
 import difflib
+import os
+from dotenv import load_dotenv
 from transformers import GPT2LMHeadModel, GPT2Tokenizer, pipeline
 
-# Set your Hugging Face model repository ID.
-MODEL_REPO_ID = "carlinsj17/VerifAI"  # Replace with your actual Hugging Face repository ID.
+# Load environment variables from .env file
+load_dotenv(os.path.join(os.path.dirname(__file__), ".env"))
+
+MODEL_REPO_ID = "carlinsj17/VerifAI"
+HF_TOKEN = os.getenv("HUGGINGFACE_API_KEY")  # Load from environment variable
 
 
-# Load your quantized model and tokenizer from Hugging Face.
-model = GPT2LMHeadModel.from_pretrained(MODEL_REPO_ID)
-tokenizer = GPT2Tokenizer.from_pretrained(MODEL_REPO_ID)
-# GPT-2 doesn't have a default pad token – we set it to the end-of-sentence token.
-if tokenizer.eos_token is None:
-    tokenizer.add_special_tokens({"eos_token": "</s>"})
-tokenizer.pad_token = tokenizer.eos_token
+# Load the model with authentication
+try:
+    model = GPT2LMHeadModel.from_pretrained(MODEL_REPO_ID, token=HF_TOKEN)
+    tokenizer = GPT2Tokenizer.from_pretrained(MODEL_REPO_ID, token=HF_TOKEN)
+    if tokenizer.eos_token is None:
+        tokenizer.add_special_tokens({"eos_token": "</s>"})
+    tokenizer.pad_token = tokenizer.eos_token
+except Exception as e:
+    print(f"Error loading model: {str(e)}")
+    # Fallback to a simple citation generator when model loading fails
+    def generate_citation_fallback(paper_info):
+        """Generate a basic citation when model is unavailable"""
+        authors = ", ".join(paper_info['authors'])
+        return f"{authors}, \"{paper_info['title']},\" {paper_info['year']}. DOI: {paper_info['doi']}"
+    model = None
+    tokenizer = None
 
-# Since we are not using the Hugging Face Inference API, we define our own generate function.
+# The rest of your generate_citation_for_paper function needs to handle both cases
 def generate_citation_for_paper(paper_info):
     """
-    Build a prompt from the paper metadata and use your loaded GPT-2 model
-    directly (via the generate() method) to produce an IEEE-style citation.
+    Generate citation using the model if available, otherwise fall back to a simple format
     """
+    if model is None or tokenizer is None:
+        # Use fallback citation format
+        authors = ", ".join(paper_info['authors'])
+        return f"{authors}, \"{paper_info['title']},\" {paper_info['year']}. DOI: {paper_info['doi']}"
+    
+    # Original model-based generation logic
     prompt = (
         f"Generate an IEEE citation for a paper with the following details:\n"
         f"Title: {paper_info['title']}\n"
@@ -47,7 +66,7 @@ def rank_references(main_title, main_abstract, references):
         # ...and similarity over the combined title+abstract vs. reference title.
         content_sim = difflib.SequenceMatcher(None, main_text.lower(), ref_title.lower()).ratio() if ref_title else 0
         # Combine the two scores with chosen weights: 70% title, 30% content.
-        final_score = 0.7 * title_sim + 0.3 * content_sim
+        final_score = (0.7 * title_sim + 0.3 * content_sim) *2
         ref["similarity_score"] = final_score
         ref["similarity_percentage"] = round(final_score * 100, 2)
     return sorted(references, key=lambda x: x.get("similarity_score", 0), reverse=True)
@@ -163,23 +182,6 @@ def search_retracted_papers(title):
             return []
     except Exception as e:
         return []
-
-def generate_citation_for_paper(paper_info):
-    """
-    Build a prompt from the paper metadata and then generate an IEEE-style citation
-    by directly using your quantized GPT-2 model's generate() method.
-    """
-    prompt = (
-        f"Generate an IEEE citation for a paper with the following details:\n"
-        f"Title: {paper_info['title']}\n"
-        f"Authors: {', '.join(paper_info['authors'])}\n"
-        f"Year: {paper_info['year']}\n"
-        f"DOI: {paper_info['doi']}\n"
-    )
-    input_ids = tokenizer.encode(prompt, return_tensors="pt")
-    output_ids = model.generate(input_ids, max_length=128, num_return_sequences=1)
-    generated_text = tokenizer.decode(output_ids[0], skip_special_tokens=True)
-    return generated_text.strip()
 
 def main(doi):
     """Fetch metadata, generate citation, check for retractions, and output as JSON."""
